@@ -38,18 +38,33 @@
       if (next){
         let rows = await tryApiUpload(next);
         if (!rows) rows = await NS.readFile(next);
+      
+        // Load saved profile first, then auto-resolve to fill gaps
+        const saved = NS.loadMappingProfile("nextwb");
+        NS.state.resolvedMap = Object.assign({}, saved);
         NS.autoResolveMapping(rows[0]||{});
+      
+        // Build mapping UI with detected headers & current map
+        const headers = NS.getHeaders(rows);
+        NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
+          NS.state.resolvedMap = map;
+          NS.saveMappingProfile("nextwb", map);
+        });
+      
         ordersRows = NS.normalizeOrders(rows);
-      } else if (review && events){
+      } else if (review && events) {
         const reviewRows = await NS.readFile(review);
+        const saved = NS.loadMappingProfile("review");
+        NS.state.resolvedMap = Object.assign({}, saved);
         NS.autoResolveMapping(reviewRows[0]||{});
+        const headers = NS.getHeaders(reviewRows);
+        NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
+          NS.state.resolvedMap = map;
+          NS.saveMappingProfile("review", map);
+        });
         ordersRows = NS.normalizeOrders(reviewRows);
-        // future: cross-check with event file
-      } else {
-        NS.toast('Upload either NEXT workbook or both raw exports.');
-        el('processStatus').textContent='';
-        return;
       }
+
 
       const results = NS.applyRules(ordersRows);
       NS.renderKPIs(results.kpis);
