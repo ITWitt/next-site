@@ -1,32 +1,52 @@
-// UI rendering helpers
 (function(NS){
-  const el = (id)=> document.getElementById(id);
+  const host = () => document.getElementById('mappingPanel');
 
-  NS.renderValidation = function(items){
-    const host = document.getElementById('validationPanel');
-    host.innerHTML = items.map(({label,ok})=>`<div class="card"><h3>${label}</h3><div>${ ok? '✅ OK' : '⚠️ Check'}</div></div>`).join('');
-  };
+  NS.buildMappingUI = function(headers, currentMap, onSave) {
+    const CANON = [
+      ["order_id","Order ID"],
+      ["driver_no","Driver #"],
+      ["signature_raw","Signature"],
+      ["gps_status","GPS"],
+      ["center","Center"],
+      ["pod_datetime","POD Date/Time"],
+      ["company_name","Company/Account"]
+    ];
 
-  NS.renderKPIs = function(k){
-    el('kpiTotal').textContent = k.total;
-    el('kpiSig').textContent = (k.sigPct||0) + '%';
-    el('kpiGPS').textContent = k.gpsZeros;
-    el('kpiDupes').textContent = k.duplicatesRemoved;
-  };
+    const opts = h => ['<option value="">(unmapped)</option>']
+      .concat(h.map(x => `<option value="${x}">${x}</option>`)).join('');
 
-  NS.renderDrivers = function(rows){
-    const tbody = document.querySelector('#driversTable tbody');
-    tbody.innerHTML = rows.map(r=>`<tr><td>${r.driver}</td><td>${r.orders}</td><td>${r.sigPct}%</td><td>${r.gps0}</td></tr>`).join('');
-  };
+    const rows = CANON.map(([key,label]) => `
+      <div class="grid cols-3" style="align-items:center;">
+        <div class="small">${label}</div>
+        <div><select id="map_${key}">${opts(headers)}</select></div>
+        <div class="small">${currentMap[key]||""}</div>
+      </div>`).join('');
 
-  NS.renderExceptions = function(rows){
-    const tbody = document.querySelector('#exceptionsTable tbody');
-    tbody.innerHTML = rows.map(r=>`<tr><td>${r.order_id}</td><td>${r.driver}</td><td>${r.issue}</td><td>${r.details||''}</td></tr>`).join('');
-  };
+    host().innerHTML = `
+      <div class="card">
+        <h3>Field Mapping</h3>
+        ${rows}
+        <div style="margin-top:10px;">
+          <button id="mapSave">Save Mapping</button>
+          <span class="small" id="mapStatus"></span>
+        </div>
+      </div>`;
 
-  NS.toast = function(msg){
-    const t = document.getElementById('toast');
-    t.textContent = msg; t.style.display='block';
-    setTimeout(()=> t.style.display='none', 3000);
+    // preselect
+    for (const [k,v] of Object.entries(currentMap||{})) {
+      const sel = document.getElementById(`map_${k}`);
+      if (sel && v) sel.value = v;
+    }
+
+    document.getElementById('mapSave').onclick = () => {
+      const result = {};
+      CANON.forEach(([k]) => {
+        const v = document.getElementById(`map_${k}`).value;
+        if (v) result[k] = v;
+      });
+      onSave(result);
+      document.getElementById('mapStatus').textContent = 'Saved.';
+      setTimeout(()=>document.getElementById('mapStatus').textContent='',1500);
+    };
   };
 })(window.NEXT);
