@@ -49,9 +49,10 @@
       const ok = sigOK(o.signature_raw);
       if (ok) sigYes++;
       else exceptions.push({ order_id: o.order_id, driver: o.driver_no, issue: 'Signature', details: o.signature_raw||'(blank)' });
-
       if (gpsZero) exceptions.push({ order_id: o.order_id, driver: o.driver_no, issue: 'GPS==0', details: '' });
-
+      // after parsing reviewRows...
+      const eventRows = await NEXT.readFile(events);
+      NEXT.state.events = eventRows;   // <-- this feeds the evIndex above
       // 🔵 Event Viewer cross-check (the new part)
       const evs = evIndex[o.order_id] || [];
       const hasEvent = evs.some(e => {
