@@ -36,7 +36,8 @@
       let ordersRows = [];
 
       if (next){
-        const rows = await NS.readFile(next);
+        let rows = await tryApiUpload(next);
+        if (!rows) rows = await NS.readFile(next);
         NS.autoResolveMapping(rows[0]||{});
         ordersRows = NS.normalizeOrders(rows);
       } else if (review && events){
