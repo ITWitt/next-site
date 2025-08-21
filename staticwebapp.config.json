@@ -1,0 +1,13 @@
+{
+  "navigationFallback": { "rewrite": "/index.html" },
+  "routes": [
+    { "route": "/api/*", "allowedRoles": [ "authenticated" ] }
+  ],
+  "auth": {
+    "identityProviders": {
+      "azureActiveDirectory": {
+        "registration": { "openIdIssuer": "" }
+      }
+    }
+  }
+}
