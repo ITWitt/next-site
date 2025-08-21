@@ -52,6 +52,9 @@
         });
       
         ordersRows = NS.normalizeOrders(rows);
+        // Parse Event Viewer
+        const eventRows = await NS.readFile(events);
+        NS.state.events = eventRows;
       } else if (review && events) {
         const reviewRows = await NS.readFile(review);
         const saved = NS.loadMappingProfile("review");
