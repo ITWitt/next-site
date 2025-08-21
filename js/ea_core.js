@@ -92,5 +92,24 @@ window.NEXT = window.NEXT || {};
     NS.state.duplicatesRemoved = dupes;
     return out;
   };
+  // Return unique headers from a sample of rows
+  window.NEXT.getHeaders = function(rows) {
+    if (!rows || !rows.length) return [];
+    const keys = new Set();
+    for (const r of rows.slice(0, 10)) Object.keys(r).forEach(k => keys.add(k));
+    return Array.from(keys).sort();
+  };
+  
+  // Persist & load mapping profiles (two types supported)
+  const MAP_KEYS = { nextwb: "next_map_nextwb", review: "next_map_review" };
+  
+  window.NEXT.saveMappingProfile = function(type, map) {
+    localStorage.setItem(MAP_KEYS[type], JSON.stringify(map||{}));
+  };
+  
+  window.NEXT.loadMappingProfile = function(type) {
+    try { return JSON.parse(localStorage.getItem(MAP_KEYS[type])||"{}"); }
+    catch { return {}; }
+  };
 
 })(window.NEXT);
