@@ -2,6 +2,12 @@
 (function(NS){
   const isLinehaul = (driverNo)=> false; // TODO: connect to registry as needed
 
+  function inBusinessDate(pod, bizISO) {
+    if (!bizISO) return true;
+    // Accept if event row contains the business date string anywhere (simple heuristic)
+    return (pod||"").toString().includes(bizISO);
+  }
+  
   // Signature compliance: 1 if looks like First LastInitial OR FirstInitial Last
   const sigOK = (raw) => {
     const s = (raw||"").toString().trim();
@@ -20,6 +26,15 @@
     const filtered = orders.filter(o => !isLinehaul(o.driver_no));
     let gpsZeros = 0, sigYes = 0;
     const exceptions = [];
+    
+    // Build a quick index of events by Order ID (supports common field names)
+    const evIndex = {};
+    const evRows = (window.NEXT.state.events || []);
+    for (const e of evRows) {
+      const oid = e['Order ID'] || e['OrderTrackingID'] || e['Order No'] || e['Tracking #'] || e['3P Tracking#'];
+      if (!oid) continue;
+      (evIndex[oid] = evIndex[oid] || []).push(e);
+    }
 
     for (const o of filtered){
       const gpsZero = (o.gps_status==="0" || o.gps_status===0 || o.gps_status==="");
