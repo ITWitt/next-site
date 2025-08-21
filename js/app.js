@@ -68,6 +68,21 @@
       el('processStatus').textContent = 'Failed.';
     }
   }
-
+  async function tryApiUpload(file) {
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: await file.arrayBuffer()
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      return data.preview;
+    } catch (e) {
+      console.warn("API upload failed, falling back:", e);
+      return null;
+    }
+  }
+  
   document.addEventListener('DOMContentLoaded', init);
 })(window.NEXT);
