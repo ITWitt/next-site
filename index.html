@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXT — Upload & Insights</title>
+  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="icon" href="data:,">
+  <!-- Light, CDN-only libs -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>NEXT — Upload & Insights</h1>
+    <div class="small">Upload the NEXT workbook or the two raw exports. The site renders the NEXT view and extra insights.</div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1) Business Date & Upload</h2>
+      <div class="grid cols-2">
+        <div>
+          <label>Business Date</label>
+          <input type="date" id="bizDate" />
+          <div class="small" id="bizInfo"></div>
+        </div>
+        <div>
+          <label>Driver Numbers (optional)</label>
+          <textarea id="driverInput" rows="2" placeholder="101, 205, 307..."></textarea>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:12px;">
+        <div>
+          <label>Option A — NEXT Workbook (.xlsx/.xlsm)</label>
+          <input type="file" id="nextFile" accept=".xlsx,.xlsm" />
+        </div>
+        <div>
+          <label>Option B — Review Orders Export</label>
+          <input type="file" id="reviewFile" accept=".csv,.xlsx,.xls" />
+        </div>
+        <div>
+          <label>Option B — Event Viewer Export</label>
+          <input type="file" id="eventFile" accept=".csv,.xlsx,.xls" />
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <button id="btnProcess">Process</button>
+        <button id="btnClear" class="secondary">Clear</button>
+        <span id="processStatus" class="small" style="margin-left:8px;"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>2) Validation & Mapping</h2>
+      <div id="validationPanel" class="grid cols-3"></div>
+      <div id="mappingPanel" style="margin-top:12px;"></div>
+    </section>
+
+    <section>
+      <h2>3) NEXT Summary</h2>
+      <div class="summary-cards">
+        <div class="card"><h3>Total Orders</h3><div class="kpi" id="kpiTotal">—</div></div>
+        <div class="card"><h3>Signature OK %</h3><div class="kpi" id="kpiSig">—</div></div>
+        <div class="card"><h3>GPS Zeros</h3><div class="kpi" id="kpiGPS">—</div></div>
+        <div class="card"><h3>Duplicates Removed</h3><div class="kpi" id="kpiDupes">—</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>4) Drivers Leaderboard</h2>
+      <table id="driversTable">
+        <thead><tr><th>Driver</th><th>Orders</th><th>Sig OK %</th><th>GPS 0</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>5) Exceptions</h2>
+      <table id="exceptionsTable">
+        <thead><tr><th>Order ID</th><th>Driver</th><th>Issue</th><th>Details</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/ea_core.js"></script>
+  <script src="js/ea_rules.js"></script>
+  <script src="js/ea_viewer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
