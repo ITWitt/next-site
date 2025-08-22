@@ -24,146 +24,143 @@
     el('processStatus').textContent='';
   }
 
+  // Helper to case-insensitively pick a value from a row by known aliases
+  function pickField(row, names){
+    for (const n of names) {
+      if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
+      const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
+      if (k && String(row[k]).trim()) return String(row[k]).trim();
+    }
+    return '';
+  }
+
+  // Common aliases we’ll look for
+  const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
+  const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
+
   async function process(){
     el('processStatus').textContent = 'Processing…';
     try{
-      const next = el('nextFile').files[0];
+      const next   = el('nextFile').files[0];
       const review = el('reviewFile').files[0];
       const events = el('eventFile').files[0];
-      const driversRaw = el('driverInput').value;
-      NS.setDrivers(driversRaw.split(/[,\\s]+/).filter(Boolean));
+
+      const driversRaw = el('driverInput').value || '';
+      NS.setDrivers(driversRaw.split(/[\s,]+/).filter(Boolean));
 
       let ordersRows = [];
 
+      // ---- Option A: NEXT workbook path ------------------------------------
       if (next){
         let rows = await tryApiUpload(next);
         if (!rows) rows = await NS.readFile(next);
-      
+
         // Load saved profile first, then auto-resolve to fill gaps
-        const saved = NS.loadMappingProfile("nextwb");
+        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("nextwb") : {};
         NS.state.resolvedMap = Object.assign({}, saved);
         NS.autoResolveMapping(rows[0]||{});
-      
-        // Build mapping UI with detected headers & current map
-        const headers = NS.getHeaders(rows);
-        NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
-          NS.state.resolvedMap = map;
-          NS.saveMappingProfile("nextwb", map);
-        });
-      
+
+        // Mapping UI (if available)
+        if (NS.getHeaders && NS.buildMappingUI){
+          const headers = NS.getHeaders(rows);
+          NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
+            NS.state.resolvedMap = map;
+            if (NS.saveMappingProfile) NS.saveMappingProfile("nextwb", map);
+          });
+        }
+
+        // Normalize orders
         ordersRows = NS.normalizeOrders(rows);
-        // Parse Event Viewer
-        const eventRows = await NS.readFile(events);
-        NS.state.events = eventRows;
-      } else if (review && events) {
-        // Keep originals (read-only)
-        NEXT.state.raw = {
-          review: await NEXT.readFile(review),
-          events: await NEXT.readFile(events)
+
+        // If an Event Viewer file is also supplied, filter it to today's orders/drivers
+        if (events){
+          const evAll = await NS.readFile(events);
+          const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
+          const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
+          NS.state.events = evAll.filter(e => {
+            const evOrder  = pickField(e, ORDER_KEYS);
+            const evDriver = pickField(e, DRIVER_KEYS);
+            return (evOrder && orderIdsToday.has(evOrder)) || (evDriver && driversToday.has(evDriver));
+          });
+        } else {
+          NS.state.events = [];
+        }
+
+        const results = NS.applyRules(ordersRows);
+        NS.renderKPIs(results.kpis);
+        NS.renderDrivers(results.leaderboard);
+        NS.renderExceptions(results.exceptions);
+        NS.renderValidation([
+          {label:'Schema', ok: Object.keys(NS.state.resolvedMap).length>0 },
+          {label:'Duplicates removed', ok: true},
+          {label:'Signature check', ok: true},
+          {label:'GPS zeros flagged', ok: true}
+        ]);
+        el('processStatus').textContent = 'Done.';
+        return;
+      }
+
+      // ---- Option B: Review Orders + Event Viewer path ----------------------
+      if (review && events) {
+        // Keep originals in memory (read-only)
+        NS.state.raw = {
+          review: await NS.readFile(review),
+          events: await NS.readFile(events)
         };
-      
-        // Build mapping from the review file only (no file edits)
-        NEXT.autoResolveMapping((NEXT.state.raw.review[0]) || {});
-        const ordersRows = NEXT.normalizeOrders(NEXT.state.raw.review);
-      
-        // Detect “today’s” drivers & order IDs from the review data
+
+        // Build mapping from review file
+        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("review") : {};
+        NS.state.resolvedMap = Object.assign({}, saved);
+        NS.autoResolveMapping((NS.state.raw.review[0]) || {});
+
+        // Mapping UI (if available)
+        if (NS.getHeaders && NS.buildMappingUI){
+          const headers = NS.getHeaders(NS.state.raw.review);
+          NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
+            NS.state.resolvedMap = map;
+            if (NS.saveMappingProfile) NS.saveMappingProfile("review", map);
+          });
+        }
+
+        // Normalize orders
+        ordersRows = NS.normalizeOrders(NS.state.raw.review);
+
+        // Detect the day's orders/drivers and filter EV to relevant rows
         const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
         const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
-      
-        // Filter Event Viewer IN-MEMORY to relevant rows (no file changes)
-        const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #"];
-        const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
-        const pick = (row, names) => {
-          for (const n of names) {
-            if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
-            const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
-            if (k && String(row[k]).trim()) return String(row[k]).trim();
-          }
-          return "";
-        };
-        NEXT.state.events = NEXT.state.raw.events.filter(e => {
-          const evOid = pick(e, ORDER_KEYS);
-          const evDrv = pick(e, DRIVER_KEYS);
-          return (evOid && orderIdsToday.has(evOid)) || (evDrv && driversToday.has(evDrv));
+        NS.state.events = NS.state.raw.events.filter(e => {
+          const evOrder  = pickField(e, ORDER_KEYS);
+          const evDriver = pickField(e, DRIVER_KEYS);
+          return (evOrder && orderIdsToday.has(evOrder)) || (evDriver && driversToday.has(evDriver));
         });
-      
-        // Compute and render (derived views only)
-        const results = NEXT.applyRules(ordersRows);
-        NEXT.renderKPIs(results.kpis);
-        NEXT.renderDrivers(results.leaderboard);
-        NEXT.renderExceptions(results.exceptions);
-        NEXT.renderValidation([
-          {label:'Schema', ok: Object.keys(NEXT.state.resolvedMap).length>0 },
-          {label:'Duplicates removed', ok: true},
-          {label:'Signature check', ok: true},
-          {label:'GPS zeros flagged', ok: true}
-        ]);
-        el('processStatus').textContent = 'Done.';
-        return;
-      }
-      
-        // 2) Parse Event Viewer
-        const evAll = await NEXT.readFile(events);
-      
-        // Helper to pick a field by common aliases (case-insensitive)
-        const pickField = (row, names) => {
-          for (const n of names) {
-            if (row[n] !== undefined) return row[n];
-            const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
-            if (k) return row[k];
-          }
-          return '';
-        };
-      
-        // Common aliases we’ll look for
-        const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#"];
-        const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver"];
-      
-        // 3) Keep only events that belong to today’s orders or today’s drivers
-        const evFiltered = evAll.filter(e => {
-          const evOrder  = (pickField(e, ORDER_KEYS)  || '').toString().trim();
-          const evDriver = (pickField(e, DRIVER_KEYS) || '').toString().trim();
-          const byOrder  = evOrder  && orderIdsToday.has(evOrder);
-          const byDriver = evDriver && driversToday.has(evDriver);
-          return byOrder || byDriver;
-        });
-      
-        // Store filtered events for rules to use (date-window checks, etc.)
-        NEXT.state.events = evFiltered;
-      
-        // Continue with the normal flow using ordersRows
-        const results = NEXT.applyRules(ordersRows);
-        NEXT.renderKPIs(results.kpis);
-        NEXT.renderDrivers(results.leaderboard);
-        NEXT.renderExceptions(results.exceptions);
-        NEXT.renderValidation([
-          {label:'Schema', ok: Object.keys(NEXT.state.resolvedMap).length>0 },
-          {label:'Duplicates removed', ok: true},
-          {label:'Signature check', ok: true},
-          {label:'GPS zeros flagged', ok: true}
-        ]);
-        el('processStatus').textContent = 'Done.';
-        return;
-      }
-      
-      const results = NS.applyRules(ordersRows);
-      NS.renderKPIs(results.kpis);
-      NS.renderDrivers(results.leaderboard);
-      NS.renderExceptions(results.exceptions);
-      NS.renderValidation([
-        {label:'Schema', ok: Object.keys(NS.state.resolvedMap).length>0 },
-        {label:'Duplicates removed', ok: true},
-        {label:'Signature check', ok: true},
-        {label:'GPS zeros flagged', ok: true}
-      ]);
 
-      el('processStatus').textContent = 'Done.';
+        const results = NS.applyRules(ordersRows);
+        NS.renderKPIs(results.kpis);
+        NS.renderDrivers(results.leaderboard);
+        NS.renderExceptions(results.exceptions);
+        NS.renderValidation([
+          {label:'Schema', ok: Object.keys(NS.state.resolvedMap).length>0 },
+          {label:'Duplicates removed', ok: true},
+          {label:'Signature check', ok: true},
+          {label:'GPS zeros flagged', ok: true}
+        ]);
+        el('processStatus').textContent = 'Done.';
+        return;
+      }
+
+      // ---- Neither path satisfied ------------------------------------------
+      NS.toast('Upload either the NEXT workbook or both raw exports (Review Orders + Event Viewer).');
+      el('processStatus').textContent = '';
+      return;
+
     } catch(err){
       console.error(err);
       NS.toast('Error: ' + (err.message||err));
       el('processStatus').textContent = 'Failed.';
     }
   }
+
+  // Try API upload first; fall back to client-side parsing
   async function tryApiUpload(file) {
     try {
       const res = await fetch("/api/upload", {
@@ -179,6 +176,6 @@
       return null;
     }
   }
-  
+
   document.addEventListener('DOMContentLoaded', init);
 })(window.NEXT);
