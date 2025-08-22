@@ -12,16 +12,21 @@
     const set = NS.state.linehaulSet || new Set();
     return set.has((driverNo||'').toString().trim());
   };
-  const sigOK = (raw)=>{
-    const s = (raw||"").toString().trim();
+  const sigOK = (raw) => {
+    const s = (raw ?? '').toString().trim();
     if (!s) return false;
+  
     const parts = s.split(/\s+/).filter(Boolean);
-    if (parts.length < 2) return false;
-    const [a,b] = parts;
-    const aInit = /^[A-Za-z]\.?$/.test(a);
-    const bInit = /^[A-Za-z]\.?$/.test(b);
-    if (aInit && b.length > 1) return true;   // F. Smith
-    if (!aInit && bInit) return true;         // Frank S.
+    const isInit = t => /^[A-Za-z]\.?$/.test(t);
+    const isWord = t => /^[A-Za-z.'-]+$/.test(t);
+  
+    // Accept full names like "Andres Duran"
+    if (parts.length >= 2 && isWord(parts[0]) && isWord(parts[1])) return true;
+  
+    // Accept "F. Smith" or "Frank S."
+    if (isInit(parts[0]) && (parts[1] || '').length > 1) return true;
+    if (!isInit(parts[0]) && isInit(parts[1])) return true;
+  
     return false;
   };
 
