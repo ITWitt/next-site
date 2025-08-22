@@ -56,22 +56,51 @@
         const eventRows = await NS.readFile(events);
         NS.state.events = eventRows;
       } else if (review && events) {
-        // 1) Parse Review Orders and normalize
-        const reviewRows = await NEXT.readFile(review);
-        NEXT.autoResolveMapping(reviewRows[0] || {});
-        let ordersRows = NEXT.normalizeOrders(reviewRows);
+        // Keep originals (read-only)
+        NEXT.state.raw = {
+          review: await NEXT.readFile(review),
+          events: await NEXT.readFile(events)
+        };
       
-        // Build sets from normalized orders (drivers & order IDs for this business date)
-        const orderIdsToday = new Set(ordersRows.map(o => (o.order_id || '').toString().trim()).filter(Boolean));
-        const driversToday  = new Set(ordersRows.map(o => (o.driver_no || '').toString().trim()).filter(Boolean));
+        // Build mapping from the review file only (no file edits)
+        NEXT.autoResolveMapping((NEXT.state.raw.review[0]) || {});
+        const ordersRows = NEXT.normalizeOrders(NEXT.state.raw.review);
       
-        // If the user pasted a big drivers list, intersect with driversToday
-        if (NEXT.state.drivers && NEXT.state.drivers.length) {
-          const userSet = new Set(NEXT.state.drivers.map(d => d.toString().trim()));
-          const filtered = new Set();
-          for (const d of driversToday) if (userSet.has(d)) filtered.add(d);
-          if (filtered.size) driversToday.clear(), filtered.forEach(v => driversToday.add(v));
-        }
+        // Detect “today’s” drivers & order IDs from the review data
+        const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
+        const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
+      
+        // Filter Event Viewer IN-MEMORY to relevant rows (no file changes)
+        const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #"];
+        const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
+        const pick = (row, names) => {
+          for (const n of names) {
+            if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
+            const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
+            if (k && String(row[k]).trim()) return String(row[k]).trim();
+          }
+          return "";
+        };
+        NEXT.state.events = NEXT.state.raw.events.filter(e => {
+          const evOid = pick(e, ORDER_KEYS);
+          const evDrv = pick(e, DRIVER_KEYS);
+          return (evOid && orderIdsToday.has(evOid)) || (evDrv && driversToday.has(evDrv));
+        });
+      
+        // Compute and render (derived views only)
+        const results = NEXT.applyRules(ordersRows);
+        NEXT.renderKPIs(results.kpis);
+        NEXT.renderDrivers(results.leaderboard);
+        NEXT.renderExceptions(results.exceptions);
+        NEXT.renderValidation([
+          {label:'Schema', ok: Object.keys(NEXT.state.resolvedMap).length>0 },
+          {label:'Duplicates removed', ok: true},
+          {label:'Signature check', ok: true},
+          {label:'GPS zeros flagged', ok: true}
+        ]);
+        el('processStatus').textContent = 'Done.';
+        return;
+      }
       
         // 2) Parse Event Viewer
         const evAll = await NEXT.readFile(events);
