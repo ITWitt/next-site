@@ -33,7 +33,7 @@
         </div>
       </div>
 
-      <div class="grid cols-3" style="margin-top:12px;">
+      <div class="grid cols-3" style="margin-top:10px;">
         <div>
           <label>Option A — NEXT Workbook (.xlsx/.xlsm)</label>
           <input type="file" id="nextFile" accept=".xlsx,.xlsm" />
@@ -48,8 +48,10 @@
         </div>
       </div>
 
-      <div style="margin-top:12px;">
+      <div style="margin-top:10px;">
         <button id="btnProcess">Process</button>
+          <button id="btnSaveRun" class="secondary">Save Run (history)</button>
+          <span id="saveStatus" class="small"></span>
         <button id="btnClear" class="secondary">Clear</button>
         <span id="processStatus" class="small" style="margin-left:8px;"></span>
       </div>
@@ -58,7 +60,7 @@
     <section>
       <h2>2) Validation & Mapping</h2>
       <div id="validationPanel" class="grid cols-3"></div>
-      <div id="mappingPanel" style="margin-top:12px;"></div>
+      <div id="mappingPanel" style="margin-top:10px;"></div>
     </section>
 
     <section>
