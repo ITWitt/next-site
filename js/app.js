@@ -2,15 +2,17 @@
   const el = (id)=> document.getElementById(id);
 
   function init(){
-    // Default business date to yesterday
-    const d = new Date(); d.setDate(d.getDate()-1);
-    el('bizDate').valueAsDate = d;
-    NS.setBizDate(el('bizDate').value);
-
-    el('bizDate').addEventListener('change', ()=> NS.setBizDate(el('bizDate').value));
-    el('btnClear').addEventListener('click', clearAll);
-    el('btnProcess').addEventListener('click', process);
+    const biz = document.getElementById('bizDate');
+    if (biz){
+      const d = new Date(); d.setDate(d.getDate()-1);
+      try { biz.valueAsDate = d; } catch(_) {}
+      if (NS.setBizDate) NS.setBizDate(biz.value);
+      biz.addEventListener('change', ()=> NS.setBizDate && NS.setBizDate(biz.value));
+    }
+    document.getElementById('btnClear')?.addEventListener('click', clearAll);
+    document.getElementById('btnProcess')?.addEventListener('click', process);
   }
+
 
   function clearAll(){
     // removed: el('nextFile').value
@@ -62,7 +64,7 @@
         NS.autoResolveMapping(reviewRaw[0] || {});
   
         // normalize
-        ordersRows = NS.normalizeOrders(reviewRaw);
+        ordersRows = NS.normalizeOrders(NS.state.raw.review);
   
         // filter EV to today’s orders/drivers
         const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
