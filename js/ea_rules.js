@@ -1,13 +1,18 @@
-// web/js/ea_rules.js
 (function(NS){
-  // (optional) make line-haul configurable from state.linehaulSet
-  const isLinehaul = (driverNo) => {
-    const set = window.NEXT.state.linehaulSet || new Set();
+  const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
+  const pickField = (row, names)=>{
+    for (const n of names){
+      if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
+      const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
+      if (k && String(row[k]).trim()) return String(row[k]).trim();
+    }
+    return '';
+  };
+  const isLinehaul = (driverNo)=>{
+    const set = NS.state.linehaulSet || new Set();
     return set.has((driverNo||'').toString().trim());
   };
-
-  // Signature rule (same as before)
-  const sigOK = (raw) => {
+  const sigOK = (raw)=>{
     const s = (raw||"").toString().trim();
     if (!s) return false;
     const parts = s.split(/\s+/).filter(Boolean);
@@ -20,75 +25,56 @@
     return false;
   };
 
-  // Simple “is in business date” check for event timestamps
-  function inBusinessDate(ts, bizISO) {
-    if (!bizISO) return true;
-    return (ts||"").toString().includes(bizISO);
-  }
-
   NS.applyRules = function(orders){
-    const filtered = orders.filter(o => !isLinehaul(o.driver_no));
+    const filtered = (orders||[]).filter(o => !isLinehaul(o.driver_no));
 
-    // Build an index of Event Viewer rows by Order ID (common field aliases)
-    const evIndex = {};
-    const evRows = window.NEXT.state.events || [];
-    for (const e of evRows) {
-      const oid = e['Order ID'] || e['OrderTrackingID'] || e['Order No'] || e['Tracking #'] || e['3P Tracking#'];
-      if (!oid) continue;
-      (evIndex[oid] = evIndex[oid] || []).push(e);
+    // orders that have at least one event row
+    const orderIdsWithEvent = new Set();
+    for (const e of (NS.state.events || [])) {
+      const oid = pickField(e, ORDER_KEYS);
+      if (oid) orderIdsWithEvent.add(oid);
     }
 
     let gpsZeros = 0, sigYes = 0;
     const exceptions = [];
 
-    // ←← THIS is the loop you asked about — add checks INSIDE it
     for (const o of filtered){
       const gpsZero = (o.gps_status==="0" || o.gps_status===0 || o.gps_status==="");
       if (gpsZero) gpsZeros++;
 
       const ok = sigOK(o.signature_raw);
       if (ok) sigYes++;
-      else exceptions.push({ order_id: o.order_id, driver: o.driver_no, issue: 'Signature', details: o.signature_raw||'(blank)' });
-      if (gpsZero) exceptions.push({ order_id: o.order_id, driver: o.driver_no, issue: 'GPS==0', details: '' });
-      // after parsing reviewRows...
-      const eventRows = await NEXT.readFile(events);
-      NEXT.state.events = eventRows;   // <-- this feeds the evIndex above
-      // 🔵 Event Viewer cross-check (the new part)
-      const evs = evIndex[o.order_id] || [];
-      const hasEvent = evs.some(e => {
-        const t = e['Event Time'] || e['Timestamp'] || e['DateTime'] || e['Created'] || "";
-        return inBusinessDate(t, window.NEXT.state.bizDate);
-      });
-      if (!hasEvent) {
-        exceptions.push({ order_id: o.order_id, driver: o.driver_no, issue: 'No Event (date window)', details: '' });
-      }
+      else exceptions.push({ order_id:o.order_id, driver:o.driver_no, issue:'Signature', details:o.signature_raw||'(blank)' });
+
+      if (gpsZero) exceptions.push({ order_id:o.order_id, driver:o.driver_no, issue:'GPS==0', details:'' });
+
+      const hasEvent = orderIdsWithEvent.has((o.order_id||'').toString().trim());
+      if (!hasEvent) exceptions.push({ order_id:o.order_id, driver:o.driver_no, issue:'No Event (date window)', details:'' });
     }
 
-    // KPIs
+    const total = filtered.length;
     const kpis = {
-      total: filtered.length,
-      sigPct: filtered.length ? Math.round((sigYes/filtered.length)*100) : 0,
+      total,
+      sigPct: total ? Math.round(sigYes*100/total) : 0,
       gpsZeros,
-      duplicatesRemoved: window.NEXT.state.duplicatesRemoved
+      duplicatesRemoved: NS.state.duplicatesRemoved || 0
     };
 
-    // Leaderboard
     const byDriver = {};
     for (const o of filtered){
-      const key = o.driver_no || '(n/a)';
-      if (!byDriver[key]) byDriver[key] = { driver: key, orders: 0, sigOK: 0, gps0: 0 };
+      const key = (o.driver_no||'(n/a)').toString();
+      if (!byDriver[key]) byDriver[key] = { driver:key, orders:0, sigOK:0, gps0:0 };
       byDriver[key].orders++;
       if (sigOK(o.signature_raw)) byDriver[key].sigOK++;
       if (o.gps_status==="0" || o.gps_status===0 || o.gps_status==="") byDriver[key].gps0++;
     }
-    const leaderboard = Object.values(byDriver).map(d => ({
-      driver: d.driver,
-      orders: d.orders,
+    const leaderboard = Object.values(byDriver).map(d=>({
+      driver:d.driver,
+      orders:d.orders,
       sigPct: d.orders ? Math.round(d.sigOK*100/d.orders) : 0,
-      gps0: d.gps0
+      gps0:d.gps0
     })).sort((a,b)=> b.orders - a.orders);
 
     return { kpis, leaderboard, exceptions };
   };
-
 })(window.NEXT);
