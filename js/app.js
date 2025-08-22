@@ -56,19 +56,67 @@
         const eventRows = await NS.readFile(events);
         NS.state.events = eventRows;
       } else if (review && events) {
-        const reviewRows = await NS.readFile(review);
-        const saved = NS.loadMappingProfile("review");
-        NS.state.resolvedMap = Object.assign({}, saved);
-        NS.autoResolveMapping(reviewRows[0]||{});
-        const headers = NS.getHeaders(reviewRows);
-        NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
-          NS.state.resolvedMap = map;
-          NS.saveMappingProfile("review", map);
+        // 1) Parse Review Orders and normalize
+        const reviewRows = await NEXT.readFile(review);
+        NEXT.autoResolveMapping(reviewRows[0] || {});
+        let ordersRows = NEXT.normalizeOrders(reviewRows);
+      
+        // Build sets from normalized orders (drivers & order IDs for this business date)
+        const orderIdsToday = new Set(ordersRows.map(o => (o.order_id || '').toString().trim()).filter(Boolean));
+        const driversToday  = new Set(ordersRows.map(o => (o.driver_no || '').toString().trim()).filter(Boolean));
+      
+        // If the user pasted a big drivers list, intersect with driversToday
+        if (NEXT.state.drivers && NEXT.state.drivers.length) {
+          const userSet = new Set(NEXT.state.drivers.map(d => d.toString().trim()));
+          const filtered = new Set();
+          for (const d of driversToday) if (userSet.has(d)) filtered.add(d);
+          if (filtered.size) driversToday.clear(), filtered.forEach(v => driversToday.add(v));
+        }
+      
+        // 2) Parse Event Viewer
+        const evAll = await NEXT.readFile(events);
+      
+        // Helper to pick a field by common aliases (case-insensitive)
+        const pickField = (row, names) => {
+          for (const n of names) {
+            if (row[n] !== undefined) return row[n];
+            const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
+            if (k) return row[k];
+          }
+          return '';
+        };
+      
+        // Common aliases we’ll look for
+        const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#"];
+        const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver"];
+      
+        // 3) Keep only events that belong to today’s orders or today’s drivers
+        const evFiltered = evAll.filter(e => {
+          const evOrder  = (pickField(e, ORDER_KEYS)  || '').toString().trim();
+          const evDriver = (pickField(e, DRIVER_KEYS) || '').toString().trim();
+          const byOrder  = evOrder  && orderIdsToday.has(evOrder);
+          const byDriver = evDriver && driversToday.has(evDriver);
+          return byOrder || byDriver;
         });
-        ordersRows = NS.normalizeOrders(reviewRows);
+      
+        // Store filtered events for rules to use (date-window checks, etc.)
+        NEXT.state.events = evFiltered;
+      
+        // Continue with the normal flow using ordersRows
+        const results = NEXT.applyRules(ordersRows);
+        NEXT.renderKPIs(results.kpis);
+        NEXT.renderDrivers(results.leaderboard);
+        NEXT.renderExceptions(results.exceptions);
+        NEXT.renderValidation([
+          {label:'Schema', ok: Object.keys(NEXT.state.resolvedMap).length>0 },
+          {label:'Duplicates removed', ok: true},
+          {label:'Signature check', ok: true},
+          {label:'GPS zeros flagged', ok: true}
+        ]);
+        el('processStatus').textContent = 'Done.';
+        return;
       }
-
-
+      
       const results = NS.applyRules(ordersRows);
       NS.renderKPIs(results.kpis);
       NS.renderDrivers(results.leaderboard);
