@@ -4,15 +4,16 @@
   function init(){
     const biz = document.getElementById('bizDate');
     if (biz){
-      const d = new Date(); d.setDate(d.getDate()-1);
-      try { biz.valueAsDate = d; } catch(_) {}
-      if (NS.setBizDate) NS.setBizDate(biz.value);
-      biz.addEventListener('change', ()=> NS.setBizDate && NS.setBizDate(biz.value));
+      // Yesterday, truncated to local midnight so valueAsDate is valid
+      const d = new Date(); d.setDate(d.getDate() - 1);
+      const local = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      biz.valueAsDate = local;                   // set via Date object
+      if (NEXT.setBizDate) NEXT.setBizDate(biz.value); // "YYYY-MM-DD"
+      biz.addEventListener('change', ()=> NEXT.setBizDate && NEXT.setBizDate(biz.value));
     }
     document.getElementById('btnClear')?.addEventListener('click', clearAll);
     document.getElementById('btnProcess')?.addEventListener('click', process);
   }
-
 
   function clearAll(){
     // removed: el('nextFile').value
