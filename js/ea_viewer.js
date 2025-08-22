@@ -41,6 +41,20 @@
     });
   };
 
+  (function(NS){
+    // Render KPI cards; shows 0 instead of "—" when value is zero
+    NS.renderKPIs = NS.renderKPIs || function(k){
+      const set = (id, v) => {
+        const n = document.getElementById(id) || document.getElementById(id.replace('%',''));
+        if (n) n.textContent = (v == null ? '—' : v);
+      };
+      set('kpiTotal',  k?.total);
+      set('kpiSig%',   k?.sigPct);
+      set('kpiGPS',    k?.gpsZeros);
+      set('kpiDupes',  k?.duplicatesRemoved);
+    };
+  })(window.NEXT);
+
   // Validation panel – harmless no-op if you don’t render anything here yet
   NS.renderValidation = NS.renderValidation || function (_checks) {};
 })(window.NEXT);
