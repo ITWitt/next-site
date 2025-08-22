@@ -1,4 +1,5 @@
 // Core: parsing, mapping, normalization
+(function (root) { root.NEXT = root.NEXT || { state: {} }; })(window);
 window.NEXT = window.NEXT || {};
 (function(NS){
   NS.state = {
