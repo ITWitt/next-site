@@ -26,43 +26,19 @@
   
   async function process(){
     el('processStatus').textContent = 'Processing…';
+    const btn = el('btnProcess'); if (btn) btn.disabled = true;
     try{
+      const next   = el('nextFile')   ? el('nextFile').files[0]   : null; // ok if you still have NEXT input
       const review = el('reviewFile').files[0];
       const events = el('eventFile').files[0];
-      if (!(review && events)) {
-        NS.toast('Please upload both files: Review Orders and Event Viewer.');
-        el('processStatus').textContent = '';
-        return;
-      }
   
-      // Keep originals (in memory)
-      NS.state.raw = {
-        review: await NS.readFile(review),
-        events: await NS.readFile(events)
-      };
+      const driversRaw = (el('driverInput')?.value || '');
+      NS.setDrivers(driversRaw.split(/[\s,]+/).filter(Boolean));
   
-      // Build mapping from Review Orders
-      const saved = NS.loadMappingProfile ? NS.loadMappingProfile("review") : {};
-      NS.state.resolvedMap = Object.assign({}, saved);
-      NS.autoResolveMapping(NS.state.raw.review[0] || {});
+      let ordersRows = [];
+      let eventsRows = [];
   
-      // Mapping UI (if present)
-      if (NS.getHeaders && NS.buildMappingUI){
-        const headers = NS.getHeaders(NS.state.raw.review);
-        NS.buildMappingUI(headers, NS.state.resolvedMap, map=>{
-          NS.state.resolvedMap = map;
-          if (NS.saveMappingProfile) NS.saveMappingProfile("review", map);
-        });
-      }
-  
-      // Normalize orders, form today's sets
-      const ordersRows = NS.normalizeOrders(NS.state.raw.review);
-      const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
-      const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
-  
-      // Filter Event Viewer to relevant rows (display-only; originals untouched)
-      const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
-      const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
+      // Helper: case-insensitive field pick
       const pick = (row, names) => {
         for (const n of names) {
           if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
@@ -71,13 +47,72 @@
         }
         return '';
       };
-      NS.state.events = NS.state.raw.events.filter(e => {
-        const evOid = pick(e, ORDER_KEYS);
-        const evDrv = pick(e, DRIVER_KEYS);
-        return (evOid && orderIdsToday.has(evOid)) || (evDrv && driversToday.has(evDrv));
-      });
+      const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
+      const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
   
-      // Compute + render
+      if (review && events) {
+        // ---- Primary path: Review Orders + Event Viewer
+        const reviewRaw = await NS.readFile(review);
+        const eventsRaw = await NS.readFile(events);
+        NS.state.raw = { review: reviewRaw, events: eventsRaw };
+  
+        // mapping
+        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("review") : {};
+        NS.state.resolvedMap = Object.assign({}, saved);
+        NS.autoResolveMapping(reviewRaw[0] || {});
+  
+        // normalize
+        ordersRows = NS.normalizeOrders(reviewRaw);
+  
+        // filter EV to today’s orders/drivers
+        const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
+        const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
+        eventsRows = eventsRaw.filter(e => {
+          const evOid = pick(e, ORDER_KEYS);
+          const evDrv = pick(e, DRIVER_KEYS);
+          return (evOid && orderIdsToday.has(evOid)) || (evDrv && driversToday.has(evDrv));
+        });
+  
+      } else if (next) {
+        // ---- Optional path: single NEXT workbook (kept for now)
+        let rows = await tryApiUpload(next);
+        if (!rows) rows = await NS.readFile(next);
+  
+        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("nextwb") : {};
+        NS.state.resolvedMap = Object.assign({}, saved);
+        NS.autoResolveMapping(rows[0] || {});
+  
+        if (NS.getHeaders && NS.buildMappingUI){
+          const headers = NS.getHeaders(rows);
+          NS.buildMappingUI(headers, NS.state.resolvedMap, map=>{
+            NS.state.resolvedMap = map;
+            if (NS.saveMappingProfile) NS.saveMappingProfile("nextwb", map);
+          });
+        }
+  
+        ordersRows = NS.normalizeOrders(rows);
+  
+        if (events) { // only read EV once if user supplied it
+          const eventsRaw = await NS.readFile(events);
+          const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
+          const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
+          eventsRows = eventsRaw.filter(e => {
+            const evOid = pick(e, ORDER_KEYS);
+            const evDrv = pick(e, DRIVER_KEYS);
+            return (evOid && orderIdsToday.has(evOid)) || (evDrv && driversToday.has(evDrv));
+          });
+        }
+  
+      } else {
+        NS.toast('Upload both raw files (Review Orders + Event Viewer), or a NEXT workbook.');
+        el('processStatus').textContent = '';
+        return;
+      }
+  
+      // one placement for events
+      NS.state.events = eventsRows;
+  
+      // single compute + render
       const results = NS.applyRules(ordersRows);
       NS.renderKPIs(results.kpis);
       NS.renderDrivers(results.leaderboard);
@@ -89,136 +124,13 @@
         {label:'GPS zeros flagged', ok: true}
       ]);
       el('processStatus').textContent = 'Done.';
+      NS.state.lastResults = results; // for Save Run, if you need it
     } catch(err){
       console.error(err);
       NS.toast('Error: ' + (err.message||err));
       el('processStatus').textContent = 'Failed.';
-    }
-  }
-
-  // Common aliases we’ll look for
-  const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
-  const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
-
-  async function process(){
-    el('processStatus').textContent = 'Processing…';
-    try{
-      const next   = el('nextFile').files[0];
-      const review = el('reviewFile').files[0];
-      const events = el('eventFile').files[0];
-
-      const driversRaw = el('driverInput').value || '';
-      NS.setDrivers(driversRaw.split(/[\s,]+/).filter(Boolean));
-
-      let ordersRows = [];
-
-      // ---- Option A: NEXT workbook path ------------------------------------
-      if (next){
-        let rows = await tryApiUpload(next);
-        if (!rows) rows = await NS.readFile(next);
-
-        // Load saved profile first, then auto-resolve to fill gaps
-        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("nextwb") : {};
-        NS.state.resolvedMap = Object.assign({}, saved);
-        NS.autoResolveMapping(rows[0]||{});
-
-        // Mapping UI (if available)
-        if (NS.getHeaders && NS.buildMappingUI){
-          const headers = NS.getHeaders(rows);
-          NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
-            NS.state.resolvedMap = map;
-            if (NS.saveMappingProfile) NS.saveMappingProfile("nextwb", map);
-          });
-        }
-
-        // Normalize orders
-        ordersRows = NS.normalizeOrders(rows);
-
-        // If an Event Viewer file is also supplied, filter it to today's orders/drivers
-        if (events){
-          const evAll = await NS.readFile(events);
-          const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
-          const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
-          NS.state.events = evAll.filter(e => {
-            const evOrder  = pickField(e, ORDER_KEYS);
-            const evDriver = pickField(e, DRIVER_KEYS);
-            return (evOrder && orderIdsToday.has(evOrder)) || (evDriver && driversToday.has(evDriver));
-          });
-        } else {
-          NS.state.events = [];
-        }
-
-        const results = NS.applyRules(ordersRows);
-        NS.renderKPIs(results.kpis);
-        NS.renderDrivers(results.leaderboard);
-        NS.renderExceptions(results.exceptions);
-        NS.renderValidation([
-          {label:'Schema', ok: Object.keys(NS.state.resolvedMap).length>0 },
-          {label:'Duplicates removed', ok: true},
-          {label:'Signature check', ok: true},
-          {label:'GPS zeros flagged', ok: true}
-        ]);
-        el('processStatus').textContent = 'Done.';
-        return;
-      }
-
-      // ---- Option B: Review Orders + Event Viewer path ----------------------
-      if (review && events) {
-        // Keep originals in memory (read-only)
-        NS.state.raw = {
-          review: await NS.readFile(review),
-          events: await NS.readFile(events)
-        };
-
-        // Build mapping from review file
-        const saved = NS.loadMappingProfile ? NS.loadMappingProfile("review") : {};
-        NS.state.resolvedMap = Object.assign({}, saved);
-        NS.autoResolveMapping((NS.state.raw.review[0]) || {});
-
-        // Mapping UI (if available)
-        if (NS.getHeaders && NS.buildMappingUI){
-          const headers = NS.getHeaders(NS.state.raw.review);
-          NS.buildMappingUI(headers, NS.state.resolvedMap, (map)=>{
-            NS.state.resolvedMap = map;
-            if (NS.saveMappingProfile) NS.saveMappingProfile("review", map);
-          });
-        }
-
-        // Normalize orders
-        ordersRows = NS.normalizeOrders(NS.state.raw.review);
-
-        // Detect the day's orders/drivers and filter EV to relevant rows
-        const orderIdsToday = new Set(ordersRows.map(o => (o.order_id||'').toString().trim()).filter(Boolean));
-        const driversToday  = new Set(ordersRows.map(o => (o.driver_no||'').toString().trim()).filter(Boolean));
-        NS.state.events = NS.state.raw.events.filter(e => {
-          const evOrder  = pickField(e, ORDER_KEYS);
-          const evDriver = pickField(e, DRIVER_KEYS);
-          return (evOrder && orderIdsToday.has(evOrder)) || (evDriver && driversToday.has(evDriver));
-        });
-
-        const results = NS.applyRules(ordersRows);
-        NS.renderKPIs(results.kpis);
-        NS.renderDrivers(results.leaderboard);
-        NS.renderExceptions(results.exceptions);
-        NS.renderValidation([
-          {label:'Schema', ok: Object.keys(NS.state.resolvedMap).length>0 },
-          {label:'Duplicates removed', ok: true},
-          {label:'Signature check', ok: true},
-          {label:'GPS zeros flagged', ok: true}
-        ]);
-        el('processStatus').textContent = 'Done.';
-        return;
-      }
-
-      // ---- Neither path satisfied ------------------------------------------
-      NS.toast('Upload either the NEXT workbook or both raw exports (Review Orders + Event Viewer).');
-      el('processStatus').textContent = '';
-      return;
-
-    } catch(err){
-      console.error(err);
-      NS.toast('Error: ' + (err.message||err));
-      el('processStatus').textContent = 'Failed.';
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
