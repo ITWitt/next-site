@@ -1,13 +1,5 @@
 (function(NS){
-  const ORDER_KEYS  = ["Order ID","OrderTrackingID","Order No","Order #","Tracking #","3P Tracking#","3P Tracking #","OrderNumber"];
-  const pickField = (row, names)=>{
-    for (const n of names){
-      if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
-      const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
-      if (k && String(row[k]).trim()) return String(row[k]).trim();
-    }
-    return '';
-  };
+  const DRIVER_KEYS = ["DriverNo","Drv No(s)","Driver #","Driver","Driver No","Driver Number","DrvNo"];
 
   // Accept: "F. Smith", "Frank Smith", "Frank S."
   const sigOK = (raw)=>{
@@ -22,62 +14,61 @@
     return false;
   };
 
-  const isLinehaul = (driverNo)=>{
-    const set = NS.state.linehaulSet || new Set();
-    return set.has((driverNo||'').toString().trim());
+  const pick = (row, names)=>{
+    for (const n of names){
+      if (row[n] != null && String(row[n]).trim()) return String(row[n]).trim();
+      const k = Object.keys(row).find(k => k.trim().toLowerCase() === n.trim().toLowerCase());
+      if (k && String(row[k]).trim()) return String(row[k]).trim();
+    }
+    return '';
   };
 
   NS.applyRules = function(orders){
-    const rows = (orders||[]).filter(o => !isLinehaul(o.driver_no));
+    const rows = orders || [];
 
-    // Unique EV orders (so multiple EV rows for one order count once)
-    const evOrderIds = new Set();
+    // --- EV rows per driver (COUNTIFS by driver) ---
+    const evByDriver = new Map();
     for (const e of (NS.state.events || [])){
-      const oid = pickField(e, ORDER_KEYS);
-      if (oid) evOrderIds.add(oid.toString().trim());
+      const drv = pick(e, DRIVER_KEYS);
+      if (!drv) continue;
+      evByDriver.set(drv, (evByDriver.get(drv) || 0) + 1);
     }
 
-    // Per driver tallies
+    // --- per-driver tallies from Review Orders ---
     const byDriver = new Map();
     for (const o of rows){
       const drv = (o.driver_no || '').toString().trim();
-      const oid = (o.order_id  || '').toString().trim();
-      if (!drv || !oid) continue;
-
+      if (!drv) continue;
       let d = byDriver.get(drv);
-      if (!d) { d = { driver:drv, total:0, sigOK:0, evOrders:0, orderIds:[] }; byDriver.set(drv, d); }
-
+      if (!d) { d = { driver:drv, total:0, sigOK:0 }; byDriver.set(drv, d); }
       d.total++;
-      d.orderIds.push(oid);
       if (sigOK(o.signature_raw)) d.sigOK++;
     }
 
-    // Count EV-used orders per driver (intersection with evOrderIds)
-    let sumTotals = 0, sumSigOK = 0, sumEvUsedUnique = 0;
+    // --- aggregate and build leaderboard ---
+    let sumTotals = 0, sumSigOK = 0, sumEvUsed = 0;
     const leaderboard = [];
 
     for (const d of byDriver.values()){
-      // dedupe order ids for driver, then count how many appear in EV set
-      const uniq = Array.from(new Set(d.orderIds));
-      const evUsed = uniq.reduce((acc, oid) => acc + (evOrderIds.has(oid) ? 1 : 0), 0);
+      const total = d.total;
+      const evUsed = Math.min(total, evByDriver.get(d.driver) || 0);
 
-      const sigPct = d.total ? Math.round(100 * d.sigOK / d.total) : 0;
-      const gps0   = Math.max(0, d.total - evUsed);
+      const sigPct = total ? Math.round(100 * d.sigOK / total) : 0;
+      const gps0   = Math.max(0, total - evUsed);
 
-      leaderboard.push({ driver:d.driver, orders:d.total, sigPct, gps0 });
+      leaderboard.push({ driver:d.driver, orders: total, sigPct, gps0 });
 
-      sumTotals += d.total;
+      sumTotals += total;
       sumSigOK  += d.sigOK;
-      sumEvUsedUnique += evUsed;
+      sumEvUsed += evUsed;
     }
 
-    // Sort by orders desc
     leaderboard.sort((a,b)=> b.orders - a.orders);
 
     const kpis = {
       total: sumTotals,
       sigPct: sumTotals ? Math.round(100 * sumSigOK / sumTotals) : 0,
-      gpsZeros: Math.max(0, sumTotals - sumEvUsedUnique),
+      gpsZeros: Math.max(0, sumTotals - sumEvUsed),
       duplicatesRemoved: NS.state.duplicatesRemoved || 0
     };
 
